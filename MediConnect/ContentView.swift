@@ -30,30 +30,30 @@ class AuthViewModel: ObservableObject {
     @Published var isAuthenticated = false
     @Published var errorMessage: String?
     @Published var isLoading = false
-    
+
     private let keychain = Keychain(service: "com.mediconnect.app")
-    
+
     func login(emailOrPhone: String, password: String) {
         guard !emailOrPhone.isEmpty, !password.isEmpty else {
             errorMessage = "Fields cannot be empty."
             return
         }
-        
+
         isLoading = true
         errorMessage = nil
-        
+
         let loginData = LoginRequest(email_or_phone: emailOrPhone, password: password)
-        
+
         guard let url = URL(string: "http://192.168.21.43:8000/login") else {
             errorMessage = "Invalid URL"
             isLoading = false
             return
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
         do {
             request.httpBody = try JSONEncoder().encode(loginData)
         } catch {
@@ -61,27 +61,38 @@ class AuthViewModel: ObservableObject {
             isLoading = false
             return
         }
-        
+
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 self?.isLoading = false
-                
+
                 if let error = error {
                     self?.errorMessage = error.localizedDescription
                     return
                 }
-                
+
                 guard let data = data else {
                     self?.errorMessage = "No data received"
                     return
                 }
-                
-                do {
-                    let response = try JSONDecoder().decode(LoginResponse.self, from: data)
-                    self?.keychain["authToken"] = response.token // Store token securely
-                    self?.isAuthenticated = true
-                } catch {
-                    self?.errorMessage = "Invalid response from server"
+
+                if let httpResponse = response as? HTTPURLResponse {
+                    switch httpResponse.statusCode {
+                    case 200:
+                        do {
+                            let loginResponse = try JSONDecoder().decode(LoginResponse.self, from: data)
+                            self?.keychain["authToken"] = loginResponse.token
+                            self?.isAuthenticated = true
+                        } catch {
+                            self?.errorMessage = "Failed to parse server response."
+                        }
+                    case 401:
+                        self?.errorMessage = "Invalid email/phone or password."
+                    default:
+                        self?.errorMessage = "Server error: \(httpResponse.statusCode)"
+                    }
+                } else {
+                    self?.errorMessage = "Unexpected server response."
                 }
             }
         }.resume()
@@ -92,7 +103,7 @@ struct ContentView: View {
     @State private var emailOrPhone = ""
     @State private var password = ""
     @StateObject private var authViewModel = AuthViewModel()
-    
+
     var body: some View {
         NavigationStack {
             VStack {
@@ -100,12 +111,12 @@ struct ContentView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .padding(.bottom, 150.0)
-                
+
                 Text("Welcome Back!")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .padding(.bottom, 50.0)
-                
+
                 // Email/Phone Input Field
                 ZStack {
                     Capsule()
@@ -117,7 +128,7 @@ struct ContentView: View {
                         .padding(.horizontal, 35.0)
                         .foregroundColor(.black)
                 }
-                
+
                 // Password Input Field
                 ZStack {
                     Capsule()
@@ -129,12 +140,12 @@ struct ContentView: View {
                         .padding(.horizontal, 35.0)
                         .foregroundColor(.black)
                 }
-                
+
                 // Remember Me and Forgot Password
                 HStack {
                     Text("Remember me")
                         .padding(.leading, 30.0)
-                    
+
                     Spacer()
                     Text("Forgot Password?")
                         .padding(.trailing, 30.0)
@@ -142,7 +153,7 @@ struct ContentView: View {
                 .padding(.top, 3.0)
                 .font(.footnote)
                 .foregroundColor(Color.gray)
-                
+
                 // Error Message
                 if let errorMessage = authViewModel.errorMessage {
                     Text(errorMessage)
@@ -150,7 +161,7 @@ struct ContentView: View {
                         .font(.footnote)
                         .padding(.top, 5)
                 }
-                
+
                 // Login Button
                 Button(action: {
                     authViewModel.login(emailOrPhone: emailOrPhone, password: password)
@@ -171,7 +182,7 @@ struct ContentView: View {
                     }
                 }
                 .disabled(authViewModel.isLoading)
-                
+
                 // Sign-Up Option
                 Spacer()
                 HStack {
@@ -183,19 +194,19 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 25.0)
                 .font(.footnote)
-                
+
                 // Conditional NavigationLink
-                        NavigationLink(value: authViewModel.isAuthenticated) {
-                            EmptyView() // This triggers navigation when `isAuthenticated` is true
-                        }
-                        .navigationDestination(for: Bool.self) { isAuthenticated in
-                            if isAuthenticated {
-                                HomeView()
-                            } else {
-                                EmptyView()
-                            }
-                        }
+                NavigationLink(value: authViewModel.isAuthenticated) {
+                    EmptyView()
+                }
+                .navigationDestination(for: Bool.self) { isAuthenticated in
+                    if isAuthenticated {
+                        HomeView()
+                    } else {
+                        EmptyView()
                     }
+                }
+            }
             .onChange(of: authViewModel.isAuthenticated) { isAuthenticated in
                 if isAuthenticated {
                     print("Successfully logged in!")
@@ -203,14 +214,22 @@ struct ContentView: View {
             }
         }
     }
-    
+
     struct SignUpView: View {
         var body: some View {
             Text("Sign Up View")
                 .font(.largeTitle)
         }
     }
-    
+
+    struct HomeView: View {
+        var body: some View {
+            Text("Welcome to MediConnect!")
+                .font(.title)
+                .padding()
+        }
+    }
+
     struct ContentView_Previews: PreviewProvider {
         static var previews: some View {
             ContentView()
